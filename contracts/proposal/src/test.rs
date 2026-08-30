@@ -280,7 +280,7 @@ fn execution_blocked_until_prerequisite_executes() {
 
     assert_eq!(
         h.client.try_execute(&h.proposer, &second),
-        Err(Ok(Error::PrerequisiteNotMet))
+        Err(Ok(Error::InvalidProposalState))
     );
     // The blocked proposal stays Approved and remains executable later.
     assert_eq!(h.client.state(&second), ProposalState::Approved);
@@ -319,7 +319,7 @@ fn all_prerequisites_must_execute() {
     assert!(!h.client.dependencies_met(&dependent));
     assert_eq!(
         h.client.try_execute(&h.proposer, &dependent),
-        Err(Ok(Error::PrerequisiteNotMet))
+        Err(Ok(Error::InvalidProposalState))
     );
 
     approve_and_execute(&h, b);
@@ -343,7 +343,7 @@ fn failed_prerequisite_blocks_the_chain_permanently() {
     assert!(!h.client.dependencies_met(&second));
     assert_eq!(
         h.client.try_execute(&h.proposer, &second),
-        Err(Ok(Error::PrerequisiteNotMet))
+        Err(Ok(Error::InvalidProposalState))
     );
     // Failed is terminal, so the prerequisite can never be satisfied.
     assert_eq!(
@@ -363,7 +363,7 @@ fn cancelled_prerequisite_blocks_the_chain() {
     h.client.approve(&h.approvers[1], &second);
     assert_eq!(
         h.client.try_execute(&h.proposer, &second),
-        Err(Ok(Error::PrerequisiteNotMet))
+        Err(Ok(Error::InvalidProposalState))
     );
 }
 
@@ -387,10 +387,7 @@ fn closed_prerequisite_still_satisfies_dependents() {
 fn self_reference_is_rejected_as_circular() {
     let h = setup(3);
     // The next id would be 1, so depending on 1 is a self-reference.
-    assert_eq!(
-        try_create_with_deps(&h, &[1]),
-        Err(Error::CircularDependencyDetected)
-    );
+    assert_eq!(try_create_with_deps(&h, &[1]), Err(Error::InvalidInput));
 }
 
 #[test]
@@ -401,7 +398,7 @@ fn forward_reference_is_rejected_as_circular() {
     // point forward, which is the only way a cycle could form.
     assert_eq!(
         try_create_with_deps(&h, &[first + 5]),
-        Err(Error::CircularDependencyDetected)
+        Err(Error::InvalidInput)
     );
 }
 

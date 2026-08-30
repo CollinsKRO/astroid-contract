@@ -339,6 +339,14 @@
                       "val": {
                         "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM"
                       }
+                    },
+                    {
+                      "key": {
+                        "symbol": "whitelist_enabled"
+                      },
+                      "val": {
+                        "bool": false
+                      }
                     }
                   ]
                 }
@@ -820,7 +828,7 @@
             ],
             "data": {
               "error": {
-                "contract": 26
+                "contract": 21
               }
             }
           }
@@ -841,7 +849,7 @@
               },
               {
                 "error": {
-                  "contract": 26
+                  "contract": 21
                 }
               }
             ],
@@ -866,7 +874,7 @@
               },
               {
                 "error": {
-                  "contract": 26
+                  "contract": 21
                 }
               }
             ],

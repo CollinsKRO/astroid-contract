@@ -61,8 +61,7 @@ use crate::access::Role;
 use astroid_shared::constants::{INSTANCE_BUMP_AMOUNT, INSTANCE_LIFETIME_THRESHOLD};
 use astroid_shared::ensure;
 use astroid_shared::errors::Error;
-use astroid_shared::math::{checked_add, checked_mul, checked_sub};
-use astroid_shared::math::{SafeAdd, SafeSub};
+use astroid_shared::math::{checked_mul, checked_sub, SafeAdd, SafeSub};
 use astroid_shared::types::ResourceState;
 use astroid_shared::validation::require_positive_amount;
 use astroid_shared::{constants, events};
@@ -486,6 +485,8 @@ impl WalletContract {
             .persistent()
             .get(&DataKey::MinReserve(wallet_id, asset))
             .unwrap_or(0)
+    }
+
     /// Whether the contract-wide circuit breaker is currently tripped.
     pub fn is_paused(env: Env) -> bool {
         Self::paused(&env)
@@ -506,6 +507,15 @@ impl WalletContract {
             .persistent()
             .get(&DataKey::Wallet(id))
             .ok_or(Error::NotFound)
+    }
+
+    /// Require `caller` to be the wallet owner.
+    fn require_owner(env: &Env, id: u64, caller: &Address) -> Result<(), Error> {
+        let wallet = Self::load_wallet(env, id)?;
+        if wallet.owner != *caller {
+            return Err(Error::Unauthorized);
+        }
+        Ok(())
     }
 
     fn store_wallet(env: &Env, id: u64, data: &WalletData) {

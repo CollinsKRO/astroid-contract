@@ -34,7 +34,7 @@
 //!
 //! The graph is acyclic by construction — see [`ProposalContract::create`] —
 //! and a dependency that would close a cycle is rejected at creation time with
-//! [`Error::CircularDependencyDetected`].
+//! [`Error::InvalidInput`].
 //!
 //! Functions: `create`, `approve`, `reject`, `cancel`, `expire`, `execute`,
 //! `fail`, `close`.
@@ -158,7 +158,7 @@ impl ProposalContract {
     /// the graph points from a higher id to a strictly lower one, and a cycle
     /// would require an edge pointing forward. That is exactly what the
     /// `dependency >= id` check rejects, with
-    /// [`Error::CircularDependencyDetected`]. Self-reference is the degenerate
+    /// [`Error::InvalidInput`]. Self-reference is the degenerate
     /// case of the same check. Because every edge strictly decreases the id,
     /// no sequence of edges can return to its starting proposal, so the graph
     /// is a DAG by construction and no traversal is needed.
@@ -218,7 +218,7 @@ impl ProposalContract {
             // Any edge that does not point strictly backwards would close a
             // cycle (or be a self-reference); see the acyclicity note above.
             if dep >= id {
-                return Err(Error::CircularDependencyDetected);
+                return Err(Error::InvalidInput);
             }
             if !env.storage().persistent().has(&DataKey::Proposal(dep)) {
                 return Err(Error::NotFound);
@@ -383,7 +383,7 @@ impl ProposalContract {
     /// value movement happens in the wallet/treasury; this records completion).
     ///
     /// Every declared prerequisite must have executed first, otherwise the call
-    /// fails with [`Error::PrerequisiteNotMet`] and nothing changes. This is
+    /// fails with [`Error::InvalidProposalState`] and nothing changes. This is
     /// checked after approval and expiry so that a proposal blocked only by its
     /// chain reports the dependency rather than a less specific error.
     /// Purge an expired proposal from storage to reclaim space.
@@ -512,7 +512,7 @@ impl ProposalContract {
         for dep in proposal.dependencies.iter() {
             let prerequisite = Self::load(env, dep)?;
             if !prerequisite.state.has_executed() {
-                return Err(Error::PrerequisiteNotMet);
+                return Err(Error::InvalidProposalState);
             }
         }
         Ok(())

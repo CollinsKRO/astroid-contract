@@ -90,16 +90,6 @@ use soroban_sdk::{
     String, Vec,
 };
 
-#[contracttype]
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum EscrowState {
-    Created = 0,
-    Funded = 1,
-    Released = 2,
-    Refunded = 3,
-    Expired = 4,
-    Closed = 5,
-    Cancelled = 6,
 /// Calculate vested amount according to a ReleaseSchedule at a given ledger timestamp.
 pub fn calculate_vested_amount(
     amount: i128,
@@ -837,7 +827,7 @@ impl EscrowContract {
         if env.ledger().timestamp() < escrow.deadline + escrow.grace_period {
             // During the grace window the counterparty may still fulfill, so funds
             // may not yet be reclaimed via refund. Use `reclaim` after grace expiry.
-            return Err(Error::GraceActive);
+            return Err(Error::InvalidState);
         }
 
         let remaining = checked_sub(escrow.funded_amount, escrow.released_amount)?;
@@ -913,14 +903,14 @@ impl EscrowContract {
     /// `Cancelled` so no other settlement path can double-spend it.
     pub fn cancel(env: Env, caller: Address, id: u64) -> Result<(), Error> {
         caller.require_auth();
-        let mut escrow = Self::load(&env, id)?;
+        let mut escrow = load_escrow(&env, id)?;
         if escrow.sender != caller {
             return Err(Error::Unauthorized);
         }
         // Cancellation is only permitted after the expiration window — clawing
         // funds back before the deadline would break the arbiter's release path.
         if env.ledger().timestamp() < escrow.deadline {
-            return Err(Error::EscrowNotExpired);
+            return Err(Error::InvalidState);
         }
         // Funds must still be in custody (unclaimed). Released / Refunded /
         // Closed / Cancelled escrows have already settled.
@@ -928,72 +918,24 @@ impl EscrowContract {
             escrow.state,
             EscrowState::Funded | EscrowState::Expired | EscrowState::Created
         ) {
-            return Err(Error::EscrowAlreadySettled);
+            return Err(Error::InvalidState);
         }
 
         escrow.state = EscrowState::Cancelled;
-        Self::store(&env, id, &escrow);
+        store_escrow(&env, id, &escrow);
         // Return the locked assets exclusively to the original depositor.
-        if escrow.funded_amount > 0 {
-            token::TokenClient::new(&env, &escrow.asset).transfer(
-                &env.current_contract_address(),
-                &escrow.sender,
-                &escrow.funded_amount,
-            );
+        Self::transfer_all(&env, &escrow, &escrow.sender);
+        for a in escrow.assets.iter() {
             events::transfer_executed(
                 &env,
                 &env.current_contract_address(),
                 &escrow.sender,
-                &escrow.asset,
-                escrow.funded_amount,
+                &a.asset,
+                a.amount,
             );
         }
         env.events().publish(
             (symbol_short!("escrow"), symbol_short!("canceled")),
-            (id, caller),
-        );
-        Ok(())
-    }
-
-    /// Close a settled escrow (terminal). Callable only once the funds have
-    /// actually moved — i.e. from `Released`, `Refunded` or `Cancelled`. An
-    /// `Expired` escrow must be `refund`ed or `cancel`led first so custody is
-    /// emptied before it can be closed; this prevents closing over still-locked
-    /// funds.
-    pub fn close(env: Env, caller: Address, id: u64) -> Result<(), Error> {
-        caller.require_auth();
-        let mut escrow = Self::load(&env, id)?;
-        if !matches!(
-            escrow.state,
-            EscrowState::Released | EscrowState::Refunded | EscrowState::Cancelled
-        ) {
-    /// Close a settled escrow (terminal).
-    /// Cancel an escrow before its fulfillment `deadline` and return any held
-    /// funds to the sender. Either the `sender` or the `arbiter` may cancel, but
-    /// only while the escrow is still `Funded`/`Created` and before the deadline
-    /// has been reached — this is the pre-fulfillment dispute exit.
-    pub fn cancel(env: Env, caller: Address, id: u64) -> Result<(), Error> {
-        caller.require_auth();
-        let mut escrow = load_escrow(&env, id)?;
-        if escrow.sender != caller && escrow.arbiter != caller {
-            return Err(Error::Unauthorized);
-        }
-        if !matches!(escrow.state, EscrowState::Funded | EscrowState::Created) {
-            return Err(Error::InvalidState);
-        }
-        // Cancellation is only permitted before the fulfillment deadline.
-        if env.ledger().timestamp() >= escrow.deadline {
-            return Err(Error::InvalidState);
-        }
-
-        Self::transfer_all(&env, &escrow, &escrow.sender);
-        for a in escrow.assets.iter() {
-            events::transfer_executed(&env, &escrow.sender, &escrow.sender, &a.asset, a.amount);
-        }
-        escrow.state = EscrowState::Refunded;
-        store_escrow(&env, id, &escrow);
-        env.events().publish(
-            (symbol_short!("escrow"), symbol_short!("cancelled")),
             (id, caller),
         );
         Ok(())
@@ -1017,7 +959,7 @@ impl EscrowContract {
         // The grace window must have fully elapsed without fulfillment.
         let grace_end = checked_add(escrow.deadline as i128, escrow.grace_period as i128)? as u64;
         if env.ledger().timestamp() < grace_end {
-            return Err(Error::GraceActive);
+            return Err(Error::InvalidState);
         }
 
         escrow.state = EscrowState::Refunded;
@@ -1036,7 +978,10 @@ impl EscrowContract {
     pub fn close(env: Env, caller: Address, id: u64) -> Result<(), Error> {
         caller.require_auth();
         let mut escrow = load_escrow(&env, id)?;
-        if !matches!(escrow.state, EscrowState::Released | EscrowState::Refunded) {
+        if !matches!(
+            escrow.state,
+            EscrowState::Released | EscrowState::Refunded | EscrowState::Cancelled
+        ) {
             return Err(Error::InvalidState);
         }
         if caller != escrow.sender && caller != escrow.recipient && caller != escrow.arbiter {
